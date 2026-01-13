@@ -104,7 +104,7 @@ if uploaded_file is not None:
                 copyText.select();
                 document.execCommand('copy');
                 copyText.style.display = 'none';
-                this.innerHTML = '✅ Copied! Now paste into Google Sheets (Ctrl+V)';
+                this.innerHTML = '✅ Copied! Now paste into Google Sheets (Ctrl+Shift+V)';
                 this.style.backgroundColor = '#217346';
             }}
         </script>
@@ -121,3 +121,4 @@ if uploaded_file is not None:
             df.to_excel(writer, index=False)
         col1.download_button("📥 Download Excel File", buffer_excel.getvalue(), "converted.xlsx")
         col2.download_button("📥 Download TSV File", tsv_text.encode('utf-8-sig'), "converted.tsv")
+

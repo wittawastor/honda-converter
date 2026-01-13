@@ -3,13 +3,12 @@ import pdfplumber
 import pandas as pd
 import re
 import io
+import streamlit.components.v1 as components
 
 st.set_page_config(page_title="Honda OEM PDF Converter", layout="wide")
 
 st.title("🚗 Honda OEM PDF Converter")
-st.markdown("""
-Upload your Honda OEM PDF files to extract product data and automatically link PO numbers to their respective rows.
-""")
+st.markdown("Upload a PDF, then click **Copy for Google Sheets** to instantly paste your data into your spreadsheet.")
 
 def process_pdf(file):
     all_rows = []
@@ -19,7 +18,7 @@ def process_pdf(file):
                 text = page.extract_text()
                 if not text: continue
                 
-                # 1. Determine Page Number
+                # 1. Page Number extraction
                 page_num_str = "Unknown"
                 page_match = re.search(r'หน้าที่\s*:\s*(\d+)/', text)
                 if page_match:
@@ -27,7 +26,7 @@ def process_pdf(file):
                 else:
                     page_num_str = str(page.page_number)
 
-                # 2. Extract PO number from the page
+                # 2. PO number extraction
                 current_page_po = ""
                 po_match = re.search(r'PO\d+', text)
                 if po_match:
@@ -37,7 +36,7 @@ def process_pdf(file):
                 page_has_products = False
 
                 for line in lines:
-                    # 3. Extract product rows (No, Code, Name, Qty, Price, Total)
+                    # 3. Product row extraction
                     match = re.search(r'^(\d+)\s+([A-Z0-9-]+)\s+(.*?)\s+(\d+)\s+([\d,]+\.\d{2})\s+([\d,]+\.\d{2})$', line)
                     if match:
                         page_has_products = True
@@ -52,64 +51,73 @@ def process_pdf(file):
                             "PO": current_page_po 
                         })
                 
-                # 4. Keep PO Row if no products found on that page
+                # 4. Keep PO only rows
                 if current_page_po and not page_has_products:
                     all_rows.append({
-                        "Page": page_num_str,
-                        "No": None,
-                        "Product Code": "PO LOCATION",
-                        "Part Name": "Found PO at bottom of page",
-                        "Qty": 0, "Price": 0, "Total": 0,
+                        "Page": page_num_str, "No": None, "Product Code": "PO LOCATION",
+                        "Part Name": "Found PO at bottom", "Qty": 0, "Price": 0, "Total": 0,
                         "PO": current_page_po
                     })
 
-        if not all_rows:
-            return None
-
+        if not all_rows: return None
         df = pd.DataFrame(all_rows)
-        # Global Backfill logic
         df['PO'] = df['PO'].replace('', pd.NA).bfill().fillna('')
         return df
 
     except Exception as e:
-        st.error(f"Error processing PDF: {e}")
+        st.error(f"Error: {e}")
         return None
 
-# File uploader
 uploaded_file = st.file_uploader("Choose a Honda OEM PDF file", type="pdf")
 
 if uploaded_file is not None:
-    with st.spinner('Processing your PDF...'):
-        df = process_pdf(uploaded_file)
+    df = process_pdf(uploaded_file)
     
     if df is not None:
-        st.success("Successfully processed!")
+        st.success("Data Processed!")
         
-        # Display data preview
+        # --- COPY TO CLIPBOARD SECTION ---
+        # Convert dataframe to TSV string (Best for Google Sheets)
+        tsv_text = df.to_csv(index=False, sep='\t')
+        
+        # Custom Javascript for the Copy Button
+        copy_button_html = f"""
+        <div style="margin-bottom: 20px;">
+            <button id="copy-btn" style="
+                background-color: #4CAF50;
+                color: white;
+                padding: 10px 24px;
+                border: none;
+                border-radius: 8px;
+                cursor: pointer;
+                font-weight: bold;
+                font-size: 16px;
+                width: 100%;">
+                📋 Click to Copy All for Google Sheets
+            </button>
+        </div>
+        <textarea id="data-area" style="display:none;">{tsv_text}</textarea>
+        <script>
+            document.getElementById('copy-btn').onclick = function() {{
+                var copyText = document.getElementById('data-area');
+                copyText.style.display = 'block';
+                copyText.select();
+                document.execCommand('copy');
+                copyText.style.display = 'none';
+                this.innerHTML = '✅ Copied! Now paste into Google Sheets (Ctrl+V)';
+                this.style.backgroundColor = '#217346';
+            }}
+        </script>
+        """
+        components.html(copy_button_html, height=70)
+        
+        # Display the data
         st.dataframe(df, use_container_width=True)
-
-        # Download Buttons
-        col1, col2 = st.columns(2)
         
-        # Excel Export
+        # Original download buttons for safety
+        col1, col2 = st.columns(2)
         buffer_excel = io.BytesIO()
         with pd.ExcelWriter(buffer_excel, engine='xlsxwriter') as writer:
-            df.to_excel(writer, index=False, sheet_name='Sheet1')
-        
-        col1.download_button(
-            label="📥 Download Excel",
-            data=buffer_excel.getvalue(),
-            file_name=f"{uploaded_file.name.rsplit('.', 1)[0]}_Converted.xlsx",
-            mime="application/vnd.ms-excel"
-        )
-
-        # TSV Export
-        tsv_data = df.to_csv(index=False, sep='\t').encode('utf-8-sig')
-        col2.download_button(
-            label="📥 Download TSV (for Google Sheets)",
-            data=tsv_data,
-            file_name=f"{uploaded_file.name.rsplit('.', 1)[0]}_Converted.tsv",
-            mime="text/tab-separated-values"
-        )
-    else:
-        st.warning("No data found in the uploaded PDF.")
+            df.to_excel(writer, index=False)
+        col1.download_button("📥 Download Excel File", buffer_excel.getvalue(), "converted.xlsx")
+        col2.download_button("📥 Download TSV File", tsv_text.encode('utf-8-sig'), "converted.tsv")
